@@ -22,7 +22,21 @@ export interface ArticleMeta {
 }
 
 export interface CachedArticle {
-  id?: string;
+  id: string;
   blob: Blob;
 }
+
+interface schemas {
+  feeds: EntityTable<Feed, "id">;
+  articles: EntityTable<ArticleMeta, "id">;
+  cachedArticles: EntityTable<CachedArticle, "id">;
+}
+
+export const db = new Dexie('RSS_Reader') as Dexie & schemas;
+
+db.version(1).stores({
+  feeds: "++id, url, title, description, siteLink, lastFetched",
+  articles: "++id, feedUrl, link, title, summary, thumbnail, pubDate, author, downloaded",
+  cachesArticles: "id, blob",
+});
 

@@ -1,4 +1,6 @@
-async function saveArticle(link: string, title: string) {
+import { db } from '$lib/db';
+
+export async function saveArticle(link: string, title: string) {
   const res = await fetch(link);
   if (!res.ok) throw new Error(`Failed to fetch article: ${link}`);
 
@@ -13,32 +15,50 @@ async function saveArticle(link: string, title: string) {
   for (const sel of assetSelectors) {
     doc.querySelectorAll(sel).forEach((el) => {
       const attr = el.getAttribute('src') || el.getAttribute('href');
-      if (attr && !attr.startsWith('data:')) assets.add(new URL(attr, link).href);
+      if (attr && !attr.startsWith('data:')) {
+        assets.add(new URL(attr, link).href);
+      }
     });
   }
 
-  // Download all assets in parallel
+  // Download all assets in parallel and replace their URLs
   await Promise.allSettled(
     Array.from(assets).map(async (url) => {
       try {
         const fileRes = await fetch(url);
         if (!fileRes.ok) throw new Error(`Failed to fetch ${url}`);
         const blob = await fileRes.blob();
-        await db.assets.put({ url, blob });
-        html = html.replaceAll(url, `local:${url}`);
+
+        // Convert blob to a local object URL
+        const localUrl = URL.createObjectURL(blob);
+        html = html.replaceAll(url, localUrl);
       } catch (err) {
-        console.warn('Asset failed:', url, err);
+        console.warn('⚠️ Asset failed:', url, err);
       }
     })
   );
 
-  await db.articles.put({
-    title,
-    link,
-    html,
-    savedAt: Date.now(),
+  // Store the HTML as a Blob in cachedArticles
+  const htmlBlob = new Blob([html], { type: 'text/html' });
+  await db.cachedArticles.put({
+    id: link, // link is the primary key in cachedArticles
+    blob: htmlBlob,
   });
 
-  console.log(`✅ Saved ${title} with ${assets.size} assets.`);
+  // Update article metadata to mark it as downloaded
+  const article = await db.articles.where('link').equals(link).first();
+  if (article) {
+    await db.articles.update(article.id!, { downloaded: true });
+  } else {
+    // if article metadata wasn’t added before
+    await db.articles.put({
+      feedUrl: '', // you can fill this if you have feed context
+      link,
+      title,
+      downloaded: true,
+    });
+  }
+
+  console.log(`✅ Saved "${title}" with ${assets.size} assets.`);
 }
 
